@@ -1,7 +1,11 @@
 import streamlit as st
-import random 
+import random
+import re
+import time
 from pdf_reader import extract_text
 from analyzer import analyze_resume
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # ----------------------------
 # Page Configuration
@@ -104,6 +108,7 @@ uploaded_file = st.file_uploader(
 # ----------------------------
 # Resume Analysis
 # ----------------------------
+
 if uploaded_file is not None:
 
     with st.spinner("📖 Reading Resume..."):
@@ -116,55 +121,137 @@ if uploaded_file is not None:
         resume[:1500],
         height=250
     )
-if st.button("🚀 Analyze Resume"):
 
-    progress = st.progress(0)
-    import time
+    # Analyze button INSIDE uploaded_file block
+    if st.button("🚀 Analyze Resume"):
 
-    for i in range(100):
-        time.sleep(0.02)
-        progress.progress(i + 1)
+        progress = st.progress(0)
 
-    result = analyze_resume(resume)
-    progress.empty()
+        for i in range(100):
+            time.sleep(0.015)
+            progress.progress(i + 1)
 
-    resume_words = set(resume.lower().split())
-    jd_words = set(job_description.lower().split())
+        result = analyze_resume(resume)
 
-    if len(jd_words) > 0:
-        matched = resume_words.intersection(jd_words)
-        score = int((len(matched) / len(jd_words)) * 100)
+        progress.empty()
+
+        # ---------- Clean Text ----------
+        def clean_text(text):
+            text = text.lower()
+            text = re.sub(r'[^a-zA-Z0-9+# ]', ' ', text)
+            return text
+
+        resume_clean = clean_text(resume)
+        jd_clean = clean_text(job_description)
+
+        # ---------- Skill Matching ----------
+        SKILLS = {
+            "python","sql","excel","power bi","tableau",
+            "pandas","numpy","matplotlib","seaborn",
+            "scikit-learn","tensorflow","keras",
+            "machine learning","deep learning",
+            "flask","django","git","github",
+            "aws","docker","kubernetes",
+            "statistics","data analysis","data visualization",
+            "mysql","mongodb","opencv","nlp",
+            "feature engineering","data cleaning",
+            "data preprocessing","linux","api","rest api"
+        }
+
+        resume_lower = resume.lower()
+        jd_lower = job_description.lower()
+
+        matched = []
+        missing = []
+
+        for skill in sorted(SKILLS):
+            if skill in jd_lower:
+                if skill in resume_lower:
+                    matched.append(skill)
+                else:
+                    missing.append(skill)
+
+        if len(matched) + len(missing) > 0:
+            keyword_score = (len(matched) / (len(matched) + len(missing))) * 100
+        else:
+            keyword_score = 0
+
+        # ---------- Cosine Similarity ----------
+        vectorizer = TfidfVectorizer(stop_words="english")
+        vectors = vectorizer.fit_transform([resume_clean, jd_clean])
+
+        similarity = cosine_similarity(vectors[0], vectors[1])[0][0]
+        similarity_score = similarity * 100
+
+        # ---------- Final Score ----------
+        score = int((keyword_score * 0.5) + (similarity_score * 0.5))
         score = min(score, 100)
-    else:
-        score = 0
+        ats_score = min(score + 10, 100)
 
-    ats_score =  int(score * 0.9 + 10)
+        st.success("✅ Analysis Completed Successfully!")
 
-    progress.empty()
+        st.markdown("## 📊 Analysis Report")
 
-    st.success("✅ Analysis Completed Successfully!")
+        col1, col2 = st.columns(2)
 
-    st.markdown("## 📊 Analysis Report")
+        with col1:
+            st.metric("📈 ATS Score", f"{ats_score}/100")
+            st.progress(ats_score / 100)
 
-    col1, col2 = st.columns(2)
+        with col2:
+            st.metric("🎯 Job Match", f"{score}%")
+            st.progress(score / 100)
 
-    with col1:
-        st.metric("📈 ATS Score", f"{ats_score}/100")
+        st.markdown("---")
 
-    with col2:
-        st.metric("🎯 Job Match", f"{score}%")
+        st.subheader("✅ Matched Skills")
 
-    st.markdown("---")
+        if matched:
+            for skill in matched:
+                st.success(f"✅ {skill}")
+        else:
+            st.warning("No matching skills found.")
 
-    st.markdown(result)
+        st.markdown("---")
 
-    st.download_button(
-        "📥 Download Report",
-        result,
-        file_name="resume_analysis.txt",
-        mime="text/plain"
-    )
+        st.subheader("❌ Missing Skills")
 
+        if missing:
+            for skill in missing:
+                st.error(f"❌ {skill}")
+        else:
+            st.success("Excellent! No important skills are missing.")
+
+        st.markdown("---")
+
+        st.subheader("🤖 AI Resume Analysis")
+        st.markdown(result)
+
+        report = f"""
+===============================
+        ATS RESUME REPORT
+===============================
+
+ATS Score : {ats_score}/100
+
+Job Match : {score}%
+
+Matched Skills:
+{', '.join(matched) if matched else 'None'}
+
+Missing Skills:
+{', '.join(missing) if missing else 'None'}
+
+AI Resume Analysis:
+{result}
+"""
+
+        st.download_button(
+            "📥 Download Full Report",
+            report,
+            file_name="ATS_Report.txt",
+            mime="text/plain"
+        )
 # ----------------------------
 # Footer
 # ----------------------------
